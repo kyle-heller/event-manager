@@ -1,23 +1,62 @@
 require 'csv'
 require 'google/apis/civicinfo_v2'
 require 'erb'
-require 'time'
+require 'date'
 
 def clean_zipcode(zipcode)
   zipcode.to_s.rjust(5,"0")[0..4]
 end
 
-def parse_phone(phone)
-  if phone.count == 10
-    phone.join
-  elsif phone.count < 10
-    false
-  elsif phone.count > 10
-    if phone[0] == 1.to_s
-      phone[1..-1].join
-    else
-      false
+def clean_phonenumber(homephone)
+    homephone = homephone.delete('^0-9').to_s #extracts numbers from string
+
+  if homephone.length == 10 
+    return homephone
+  end
+  if homephone.length == 11
+    if homephone[0] == "1"
+      return homephone = homephone[1..11]
+    else false
     end
+  end
+end
+
+def frequent_time(regtime)
+  hours = Array.new
+  regtime.each do
+    |time|
+     parsed_time = time[time.index(' ')+1..-1]
+  date = Time.parse(parsed_time)
+  hours.push(date.hour)
+  end
+  return hours.group_by { |n| n }.values.max_by(&:size).first #Prints most frequent hour
+
+end
+
+def frequent_date(regdate)
+  dates = Array.new
+  
+  regdate.each do
+    |date|
+    dates.push(Date.strptime(date, '%D').wday) 
+  end
+
+  day = dates.group_by { |n| n }.values.max_by(&:size).first #Prints most frequent day of week (0-6, Sunday is zero).
+  
+  if day = 0
+    return "Sunday"
+  elsif day == 1
+    return "Monday"
+  elsif day == 2
+    return "Tuesday"
+  elsif day == 3
+    return "Wednesday"
+  elsif day == 4
+    return "Thursday"
+  elsif day == 5
+    return "Friday"
+  elsif day == 6
+    return "Saturday"
   end
 end
 
@@ -46,6 +85,16 @@ def save_thank_you_letter(id,form_letter)
   end
 end
 
+def save_registration_analysis(regdate, regtime)
+  Dir.mkdir('output') unless Dir.exist?('output')
+
+  filename = "output/registration_analysis.txt"
+
+  File.open(filename, 'w') do |file|
+    file.puts "The most common date was #{regdate} and the most common hour was #{regtime}:00."
+  end
+end
+
 puts 'EventManager initialized.'
 
 contents = CSV.open(
@@ -57,40 +106,23 @@ contents = CSV.open(
 template_letter = File.read('form_letter.erb')
 erb_template = ERB.new template_letter
 
-times = []
-days = []
+regtime = Array.new
+regdate = Array.new
 
 contents.each do |row|
   id = row[0]
   name = row[:first_name]
   zipcode = clean_zipcode(row[:zipcode])
+  homephone = clean_phonenumber(row[:homephone])
+  regtime.push(row[:regdate])
+  regdate.push(row[:regdate])
+
   legislators = legislators_by_zipcode(zipcode)
   form_letter = erb_template.result(binding)
-  phone = row[:homephone].gsub(/\D/, "").chars
-  parse_phone(phone)
   save_thank_you_letter(id,form_letter)
-  time = row[:regdate]
-  time = DateTime.strptime(time, '%m/%d/%y %H:%M')
-  formatted = time.strftime("%I %p")
-  times << formatted
-  days << time.strftime("%A")
 end
 
-def common_times(times)
-  hash = Hash.new(0)
-  times.each do |time| 
-    hash[time] += 1
-  end
-  hash.each{|k,v| if v > 1 then puts "#{k} - #{v} registrations" end}
-end
+frequent_hour = frequent_time(regtime)
+frequent_day = frequent_date(regdate)
 
-def common_days(days)
-  hash = Hash.new(0)
-  days.each do |day| 
-    hash[day] += 1
-  end
-  hash.each{|k,v| if v > 0 then puts "#{k} - #{v} registrations" end}
-end
-
-common_days(days)
-common_times(times)
+save_registration_analysis(frequent_day, frequent_hour)
